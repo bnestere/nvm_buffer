@@ -22,22 +22,23 @@ int main(int argc, char *argv[]) {
   b = (long *) b_p;
   c = (long *) c_p;
 
-  //rt_mem->write_direct((void *) ((long) 7), sizeof(long), &a[0]);
+  //rt_mem->write_literal((void *) ((long) 7), sizeof(long), &a[0]);
   //printf("a[%d] = %lu\n", i, *((long *)rt_mem->read(&a[0])));
 
-  // rt_mem->write_direct((void *) ((long) i), sizeof(long), &a[i]);
-  // rt_mem->write_direct((void *) ((long) i), sizeof(long), &a[i]);
+  // rt_mem->write_literal((void *) ((long) i), sizeof(long), &a[i]);
+  // rt_mem->write_literal((void *) ((long) i), sizeof(long), &a[i]);
 
   for(j = 0; j < 250; j++) {
 
     //printf("Pre a and b init\n");
     for(i = 0; i < VEC_SZ; i++) {
       //printf("Writing a for j = %d i = %d\n", j, i);
-      rt_mem->write_direct((void *) ((long) i), sizeof(long), &a[i]);
-      rt_mem->write_direct((void *) ((long) i + VEC_SZ), sizeof(long), &b[i]);
-      //printf("Finished writing\n");
-      //a_val = *((long *) rt_mem->read(&a[i]));
-      //b_val = *((long *) rt_mem->read(&b[i]));
+      rt_mem->write_literal((void *) ((long) i), sizeof(long), &a[i]);
+      rt_mem->write_literal((void *) ((long) i + VEC_SZ), sizeof(long), &b[i]);
+     // printf("Finished writing\n");
+      a_val = *((long *) rt_mem->read(&a[i]));
+      b_val = *((long *) rt_mem->read(&b[i]));
+      //printf("Finished writing j %d i %d, a = %lu, b = %lu\n", j, i, a_val, b_val);
       //printf("Finished reading\n");
     }
 
@@ -45,11 +46,11 @@ int main(int argc, char *argv[]) {
     for(i = 0; i < VEC_SZ; i++) {
       a_val = *((long *) rt_mem->read(&a[i]));
       b_val = *((long *) rt_mem->read(&b[i]));
-      rt_mem->write_direct((void *) ((long) a_val + b_val), sizeof(long), &c[i]);
+      rt_mem->write_literal((void *) ((long) a_val + b_val), sizeof(long), &c[i]);
     }
 
     //printf("Pre write direct\n");
-    //rt_mem->write_direct((void *) ((long) 22), sizeof(long), a);
+    //rt_mem->write_literal((void *) ((long) 22), sizeof(long), a);
     //printf("Post write direct\n");
 
     printf("Finished computation for j = %d\n", j);

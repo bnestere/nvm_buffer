@@ -12,7 +12,7 @@ typedef struct write_t write_t;
 
 struct rt_mem_t {
   void (*write)(void *data, int len, void *location);
-  void (*write_direct)(void *d_data, int len, void *location); // The d_data "pointer" is actually the data, don't dereference or else!
+  void (*write_literal)(void *d_data, int len, void *location); // The d_data "pointer" is actually the data, don't dereference or else!
   void *(*read)(void *location);
   void (*do_transfer)(void);
 };
