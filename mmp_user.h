@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define WRITE_BUFFER_SIZE 8192
+#define WRITE_BUFFER_SIZE 131072
 
 typedef struct rt_mem_t rt_mem_t;
 typedef struct buffer_t buffer_t;
@@ -12,14 +12,16 @@ typedef struct write_t write_t;
 
 struct rt_mem_t {
   void (*write)(void *data, int len, void *location);
+  void (*write_direct)(void *d_data, int len, void *location); // The d_data "pointer" is actually the data, don't dereference or else!
   void *(*read)(void *location);
   void (*do_transfer)(void);
 };
 
 struct write_t {
   void *data;
-  int len;
   void *write_to;
+  int len;
+  int direct_val;
 };
 
 struct buffer_t {
@@ -32,6 +34,6 @@ struct buffer_t {
 
 
 //Functions
-rt_mem_t get_rt_mem(void);
+rt_mem_t *get_rt_mem(void);
 
 #endif

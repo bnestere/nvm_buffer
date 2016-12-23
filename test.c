@@ -12,7 +12,6 @@ int main(int argc, char *argv[]) {
   long *np, *dp, *r;
   int i;
   rt_mem_t *rt_mem = get_mmp_initializer()->initialize();
-  printf("Initialized\n");
 
   nvm = mmap(0, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
   dram = mmap(0, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
@@ -23,8 +22,9 @@ int main(int argc, char *argv[]) {
     dp[i] = i * 2;
     dp[i+1] = dp[i] +  3;
     //dp[i+1] = ((i) * 2) - 4;
-    printf("Doing write\n");
     rt_mem->write((void *) &dp[i], 2 * sizeof(long), (void *) &np[i]);
+    printf("Reading np[%d] = %lu\n",i, *((long *) rt_mem->read(&np[i])));
+    printf("Reading np[%d] = %lu\n",i, *((long *) rt_mem->read(&np[i])));
   }
 
   for(i = 0; i < 10; i++) {
@@ -36,7 +36,4 @@ int main(int argc, char *argv[]) {
   for(i = 0; i < 10; i++) {
     printf("post xfer NVM val is %lu\n", np[i]);
   }
-  //long *r = (long *) rt_mem.read((void *) np);
-
-  //printf("NVM val is %lu\n", np[1]);
 }
