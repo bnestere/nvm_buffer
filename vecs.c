@@ -23,8 +23,6 @@ int main(int argc, char *argv[]) {
   b = (long *) b_p;
   c = (long *) c_p;
 
-  printf("A: 0x%llx, B: 0x%llx, C: 0x%llx\n", a_p, b_p, c_p);
-
   // Outer for loop is just to increase computation time
   for(j = 0; j < 250; j++) {
 
