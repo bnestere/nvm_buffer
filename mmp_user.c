@@ -11,7 +11,10 @@ void my_xfer(void);
 static int is_initialized = 0, initializing = 0, transferring = 0;
 static buffer_t buffer;
 
-long hash_addr(long addr) {
+/*
+ * Used to get the index in the buffer.dirties from the intended nvm address
+ */
+static inline long hash_addr(long addr) {
   return buffer.and_seed & (addr);
 }
 
@@ -33,7 +36,7 @@ void my_write(void *data, int len, void *location) {
   int wIdx, r;
   long dirty_idx;
 
-  wIdx = __sync_fetch_and_add(&(buffer.write_idx), 1) % WRITE_BUFFER_SIZE;
+  wIdx = __sync_fetch_and_add(&(buffer.write_idx), 1) & buffer.and_seed;
   //Circular buffer
   if(buffer.write_idx >= WRITE_BUFFER_SIZE) {
     __sync_fetch_and_and(&(buffer.write_idx), buffer.and_seed);
@@ -56,20 +59,10 @@ void my_write(void *data, int len, void *location) {
  * data doesn't actually point to a value. Instead, the pointer of data is the actual value and continues for len.
  */
 void my_write_literal(void *data, int len, void *location) {
-  int wIdx, r;
+  int wIdx, r, *dirty_holder;
   long dirty_idx;
-  //void *persistent_data;
 
-  //persistent_data = (void *) malloc(len);
-  //if(!persistent_data) {
-  //  perror("Failed to alloc persistent_data");
-  //  return;
-  // }
-  //memcpy(persistent_data, &data, len); 
-
-  //while(transferring);
-
-  wIdx = __sync_fetch_and_add(&(buffer.write_idx), 1) % WRITE_BUFFER_SIZE;
+  wIdx = __sync_fetch_and_add(&(buffer.write_idx), 1) & buffer.and_seed;
 
   //Circular buffer
   if(buffer.write_idx >= WRITE_BUFFER_SIZE) {
@@ -77,19 +70,16 @@ void my_write_literal(void *data, int len, void *location) {
   }
 
   write_t *ele = &buffer.elements[wIdx];
-  //ele->data = persistent_data;
   ele->len = len;
   ele->write_to = location;
   ele->direct_val = 1;
   memcpy(&(ele->data), &data, len); // Treat the void pointer as a literal value
 
   dirty_idx = hash_addr((long) location);
-  r = __sync_fetch_and_add(&(buffer.dirties[dirty_idx]), 1);
-  //if(buffer.dirties[dirty_idx] > 1) {
-  //  printf("IDX %d has a collision. location=0x%llx, val=%lu, shifty=%lu\n", dirty_idx, (long) location, (long) location, hash_addr((long) location));
- // }
+  dirty_holder = &(buffer.dirties[dirty_idx]);
+  r = __sync_fetch_and_add(dirty_holder, 1);
   while(!r) {
-    r = __sync_fetch_and_add(&(buffer.dirties[dirty_idx]), 1);
+    r = __sync_fetch_and_add(dirty_holder, 1);
   }
 }
 
@@ -121,17 +111,12 @@ void my_xfer() {
     goto wait_for_finish;
   }
 
-
-  //printf("pre actual xfer, read idx %d write %d\n", buffer.read_idx, buffer.write_idx);
   while(buffer.read_idx != buffer.write_idx) {
     i = buffer.read_idx;
-
-    //printf("Transferring for read idx %d and write idx %d\n", i, buffer.write_idx);
 
     to_write = &(buffer.elements[i]);
     if(to_write->direct_val) {
       memcpy(to_write->write_to, &(to_write->data), to_write->len);
-      to_write->direct_val = 0; // cleanup
     } else {
       memcpy(to_write->write_to, to_write->data, to_write->len);
     }
@@ -140,12 +125,11 @@ void my_xfer() {
     dirty_idx = hash_addr((long) to_write->write_to);
     r = __sync_fetch_and_sub(&(buffer.dirties[dirty_idx]), 1);
 
-    //__sync_fetch_and_add(&(buffer.read_idx), 1);
-    buffer.read_idx = buffer.read_idx + 1;
-    if(buffer.read_idx >= WRITE_BUFFER_SIZE) {
-      buffer.read_idx = buffer.read_idx & buffer.and_seed; 
-    }
+    // no need for atomic as one thread will do the full transfer at a time
+    buffer.read_idx = (buffer.read_idx + 1) & buffer.and_seed;
   }
+
+  // signal completion of the transferring
   __sync_bool_compare_and_swap(&transferring, 1, 0);
   
   return;
