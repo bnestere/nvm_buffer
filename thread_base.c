@@ -8,21 +8,27 @@
 #define SIZE 16384
 #define REPS 1000
 #define BLOCK (SIZE / NO_THREADS)
+#define READS_PER_WRITE 1 // n reads per 1 write
 
 long *dat;
 
 void subroutine1(long tid) {
-	int i, j;
-	long holder;
+	int i, j, k;
+	long holders[READS_PER_WRITE], sum;
 
 	int start = BLOCK * tid;
 	int end = start + BLOCK - 1;
 
 	for(i = 0; i < REPS; i++) {
-		for(j = start; j < end; j++) {
-			holder = dat[j];
-			holder = holder + 1;
-			dat[j] = holder;
+		for(j = start; j < end; j += (READS_PER_WRITE + 2)) {
+      for(k = 0; k < READS_PER_WRITE; k++) {
+        holders[k] = dat[j + k];
+      }
+      sum = 0;
+      for(k = 0; k < READS_PER_WRITE; k++) {
+        sum += holders[k];
+      }
+      dat[j + READS_PER_WRITE + 1] = sum;
 		}
 	}
 }
