@@ -3,6 +3,7 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <string.h>
+#include <time.h>
 
 #include "mmp_user.h"
 
@@ -11,10 +12,9 @@ void my_xfer(void);
 static int is_initialized = 0, initializing = 0, transferring = 0;
 static buffer_t buffer;
 
-/*
- * Used to get the index in the buffer.dirties from the intended nvm address
- */
-static inline long hash_addr(long addr) {
+struct timespec tim, tim2;
+
+long hash_addr(long addr) {
   return buffer.and_seed & (addr);
 }
 
@@ -27,6 +27,10 @@ void internal_init() {
       buffer.read_idx = 0;
       buffer.write_idx = 0;
       buffer.and_seed = WRITE_BUFFER_SIZE - 1;
+
+			tim.tv_sec = 0;
+			tim.tv_nsec = 10;
+
       is_initialized = 1;
     }
   }
@@ -37,14 +41,9 @@ void my_write(void *data, int len, void *location) {
   long dirty_idx;
 
   wIdx = __sync_fetch_and_add(&(buffer.write_idx), 1) & buffer.and_seed;
-  //Circular buffer
-  if(buffer.write_idx >= WRITE_BUFFER_SIZE) {
-    __sync_fetch_and_and(&(buffer.write_idx), buffer.and_seed);
-  }
 
   write_t *ele = &buffer.elements[wIdx];
   ele->data = data;
-  ele->len = len;
   ele->write_to = location;
   ele->direct_val = 0;
 
@@ -53,34 +52,44 @@ void my_write(void *data, int len, void *location) {
   while(!r) {
     r = __sync_fetch_and_add(&(buffer.dirties[dirty_idx]), 1);
   }
+
+	// Len is set last because it is used to determine if the data is ready to be moved from buffer to nvm
+  ele->len = len;
 }
 
 /*
  * data doesn't actually point to a value. Instead, the pointer of data is the actual value and continues for len.
  */
 void my_write_literal(void *data, int len, void *location) {
-  int wIdx, r, *dirty_holder;
+  int wIdx, r;
   long dirty_idx;
+  //void *persistent_data;
+
+  //persistent_data = (void *) malloc(len);
+  //if(!persistent_data) {
+  //  perror("Failed to alloc persistent_data");
+  //  return;
+  // }
+  //memcpy(persistent_data, &data, len); 
+
+  //while(transferring);
 
   wIdx = __sync_fetch_and_add(&(buffer.write_idx), 1) & buffer.and_seed;
 
-  //Circular buffer
-  if(buffer.write_idx >= WRITE_BUFFER_SIZE) {
-    __sync_fetch_and_and(&(buffer.write_idx), buffer.and_seed);
-  }
-
   write_t *ele = &buffer.elements[wIdx];
-  ele->len = len;
+  //ele->data = persistent_data;
   ele->write_to = location;
   ele->direct_val = 1;
   memcpy(&(ele->data), &data, len); // Treat the void pointer as a literal value
 
   dirty_idx = hash_addr((long) location);
-  dirty_holder = &(buffer.dirties[dirty_idx]);
-  r = __sync_fetch_and_add(dirty_holder, 1);
+  r = __sync_fetch_and_add(&(buffer.dirties[dirty_idx]), 1);
   while(!r) {
-    r = __sync_fetch_and_add(dirty_holder, 1);
+    r = __sync_fetch_and_add(&(buffer.dirties[dirty_idx]), 1);
   }
+
+	// Len is set last because it is used to determine if the data is ready to be moved from buffer to nvm
+  ele->len = len;
 }
 
 void *my_read(void *location) {
@@ -88,11 +97,18 @@ void *my_read(void *location) {
   if(buffer.dirties[dirty_idx]) {
     //value is in the buffer
     //Wait for the data to transfer
-    //printf("Doing xfer from read\n");
     my_xfer();
   }
   
   return (void *) location;
+}
+
+void my_check_self() {
+
+	//  If the buffer indexes have surpassed the buffer size, do a quick fix to put it back
+	if(buffer.write_idx >= WRITE_BUFFER_SIZE) {
+		__sync_fetch_and_and(&(buffer.write_idx), buffer.and_seed);
+	}
 }
 
 void my_xfer() {
@@ -111,25 +127,44 @@ void my_xfer() {
     goto wait_for_finish;
   }
 
+  my_check_self();
+
+  //printf("pre actual xfer, read idx %d write %d\n", buffer.read_idx, buffer.write_idx);
   while(buffer.read_idx != buffer.write_idx) {
     i = buffer.read_idx;
 
     to_write = &(buffer.elements[i]);
-    if(to_write->direct_val) {
+
+		while(to_write->len == 0) {
+      my_check_self();
+      if(buffer.read_idx == buffer.write_idx) {
+        goto xfer_quit;
+      }
+			//	Write index has been moved up, but the data isn't ready yet. Sleep a tad to give the other thread time
+			nanosleep(&tim, &tim2); // 10 nanosecs?
+		}
+
+    if(to_write->direct_val == 1) {
+			//	Treat the value stored in the pointer as literal
       memcpy(to_write->write_to, &(to_write->data), to_write->len);
     } else {
+			// Not literal, do a copy like the data is an actual pointer
       memcpy(to_write->write_to, to_write->data, to_write->len);
     }
 
-    //Cleanup
+		//	Cleanup
+		to_write->direct_val = 0; 
+		to_write->len = 0;
     dirty_idx = hash_addr((long) to_write->write_to);
     r = __sync_fetch_and_sub(&(buffer.dirties[dirty_idx]), 1);
 
-    // no need for atomic as one thread will do the full transfer at a time
-    buffer.read_idx = (buffer.read_idx + 1) & buffer.and_seed;
+    buffer.read_idx = buffer.read_idx + 1;
+    if(buffer.read_idx >= WRITE_BUFFER_SIZE) {
+      buffer.read_idx = buffer.read_idx & buffer.and_seed; 
+    }
   }
 
-  // signal completion of the transferring
+xfer_quit:
   __sync_bool_compare_and_swap(&transferring, 1, 0);
   
   return;
@@ -139,12 +174,12 @@ wait_for_finish:
   return;
 }
 
-
 static rt_mem_t glob_rt_mem = {
   .write = my_write,
   .write_literal = my_write_literal,
   .read = my_read,
-  .do_transfer = my_xfer
+  .do_transfer = my_xfer,
+	.check_self = my_check_self
 };
 
 rt_mem_t *get_rt_mem() {

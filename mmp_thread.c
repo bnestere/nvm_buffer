@@ -11,6 +11,7 @@ void *LoopTransfer(void *rt_mem_p) {
   while(1) {
     //Transfer every 50 milliseconds for dram shenanigans
     rt_mem->do_transfer();
+		rt_mem->check_self();
     nanosleep(&sleep_spec, NULL);
   }
 
