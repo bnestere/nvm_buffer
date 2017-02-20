@@ -47,6 +47,7 @@ void my_write(void *data, int len, void *location) {
   ele->write_to = location;
   ele->direct_val = 0;
 
+  // For reads to know if this value hasn't been moved to NVRAM yet
   dirty_idx = hash_addr((long) location);
   r = __sync_fetch_and_add(&(buffer.dirties[dirty_idx]), 1);
   while(!r) {
@@ -63,25 +64,19 @@ void my_write(void *data, int len, void *location) {
 void my_write_literal(void *data, int len, void *location) {
   int wIdx, r;
   long dirty_idx;
-  //void *persistent_data;
-
-  //persistent_data = (void *) malloc(len);
-  //if(!persistent_data) {
-  //  perror("Failed to alloc persistent_data");
-  //  return;
-  // }
-  //memcpy(persistent_data, &data, len); 
-
-  //while(transferring);
 
   wIdx = __sync_fetch_and_add(&(buffer.write_idx), 1) & buffer.and_seed;
+  //wIdx = __sync_fetch_and_add(&(buffer.write_idx), 1);
+  //if(wIdx >= WRITE_BUFFER_SIZE) {
+  //  wIdx = wIdx & buffer.and_seed;
+ // }
 
   write_t *ele = &buffer.elements[wIdx];
-  //ele->data = persistent_data;
   ele->write_to = location;
   ele->direct_val = 1;
   memcpy(&(ele->data), &data, len); // Treat the void pointer as a literal value
 
+  // For reads to know if this value hasn't been moved to NVRAM yet
   dirty_idx = hash_addr((long) location);
   r = __sync_fetch_and_add(&(buffer.dirties[dirty_idx]), 1);
   while(!r) {
@@ -111,6 +106,14 @@ void my_check_self() {
 	}
 }
 
+inline void inline_check_self() {
+
+	//  If the buffer indexes have surpassed the buffer size, do a quick fix to put it back
+	if(buffer.write_idx >= WRITE_BUFFER_SIZE) {
+		__sync_fetch_and_and(&(buffer.write_idx), buffer.and_seed);
+	}
+}
+
 void my_xfer() {
   int i, r, dirty_idx;
   write_t *to_write;
@@ -127,19 +130,17 @@ void my_xfer() {
     goto wait_for_finish;
   }
 
-  my_check_self();
 
-  //printf("pre actual xfer, read idx %d write %d\n", buffer.read_idx, buffer.write_idx);
-  while(buffer.read_idx != buffer.write_idx) {
+  while(buffer.read_idx != (buffer.write_idx & buffer.and_seed)) {
     i = buffer.read_idx;
 
     to_write = &(buffer.elements[i]);
 
+    // Len is written to last and used here as a "ready" flag
 		while(to_write->len == 0) {
-      my_check_self();
-      if(buffer.read_idx == buffer.write_idx) {
-        goto xfer_quit;
-      }
+      //if(buffer.read_idx == buffer.write_idx & buffer.and_seed) {
+        //goto xfer_quit;
+      //}
 			//	Write index has been moved up, but the data isn't ready yet. Sleep a tad to give the other thread time
 			nanosleep(&tim, &tim2); // 10 nanosecs?
 		}
@@ -165,12 +166,16 @@ void my_xfer() {
   }
 
 xfer_quit:
-  __sync_bool_compare_and_swap(&transferring, 1, 0);
+  // no need for atomic here because there is only 1 thread doing this at a time
+  transferring = 0;
+  //__sync_bool_compare_and_swap(&transferring, 1, 0);
   
   return;
 
 wait_for_finish:
-  while(transferring);
+  while(transferring) {
+    nanosleep(&tim, &tim2);
+  }
   return;
 }
 
